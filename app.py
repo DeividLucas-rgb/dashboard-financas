@@ -29,14 +29,12 @@ def carregar_categorias():
     cat_rec_padrao = ["Salário", "Freelancer", "Investimentos", "Outras Receitas"]
     cat_desp_padrao = ["Recreação", "Elétrica", "Moradia", "Saúde", "Transporte", "Alimentação", "Outras Despesas"]
     
-    # Busca Receitas
     try:
         df_rec = conn.read(worksheet="Categorias_Receita", ttl=0)
         rec = df_rec["Categoria"].dropna().tolist() if not df_rec.empty and "Categoria" in df_rec.columns else cat_rec_padrao
     except Exception:
         rec = cat_rec_padrao
 
-    # Busca Despesas
     try:
         df_desp = conn.read(worksheet="Categorias_Despesa", ttl=0)
         desp = df_desp["Categoria"].dropna().tolist() if not df_desp.empty and "Categoria" in df_desp.columns else cat_desp_padrao
@@ -53,7 +51,7 @@ def salvar_dados(df_para_salvar):
         conn.update(worksheet="Lancamentos", data=df_salvar)
         return True
     except Exception as e:
-        st.error(f"⚠️ Erro ao salvar dados no Google Sheets: {e}. Verifique as permissões de edição da planilha.")
+        st.error(f"⚠️ Erro ao salvar dados no Google Sheets: {e}.")
         return False
 
 def salvar_categorias_no_sheets(tipo):
@@ -67,7 +65,7 @@ def salvar_categorias_no_sheets(tipo):
             conn.update(worksheet="Categorias_Despesa", data=df_c)
         return True
     except Exception as e:
-        st.error(f"⚠️ Erro ao salvar categorias no Google Sheets: {e}. Verifique se a planilha está liberada para edição.")
+        st.error(f"⚠️ Erro ao salvar categorias no Google Sheets: {e}.")
         return False
 
 # Carregamento Inicial
@@ -140,7 +138,6 @@ mes_num_sel = [k for k, v in meses_nome.items() if v == mes_sel][0]
 # 4. DIÁLOGOS E POPUPS DE AÇÃO
 # ==========================================
 
-# Popup 1: Novo Lançamento
 @st.dialog("➕ Novo Lançamento")
 def novo_lancamento():
     tipo = st.radio("Tipo de Registro", ["Receita", "Despesa"], horizontal=True, key="tipo_registro_radio")
@@ -177,7 +174,6 @@ def novo_lancamento():
                 st.success("Salvo com sucesso no Google Sheets!")
                 st.rerun()
 
-# Popup 2: Gerenciar Categorias
 @st.dialog("⚙️ Gerenciar Categorias")
 def gerenciar_categorias():
     tipo_gerenciar = st.radio("Selecione o Tipo de Categoria:", ["Receita", "Despesa"], horizontal=True)
@@ -223,7 +219,8 @@ else:
     df_ano = pd.DataFrame(columns=df.columns)
     df_mes = pd.DataFrame(columns=df.columns)
 
-cores_pie = ["#6C5CE7", "#00CEC9", "#FD79A8", "#00B894", "#FDCB6E", "#E17055"]
+cores_despesa = ["#6C5CE7", "#00CEC9", "#FD79A8", "#00B894", "#FDCB6E", "#E17055"]
+cores_receita = ["#00B894", "#00CEC9", "#0984E3", "#6C5CE7", "#A29BFE", "#55E6C1"]
 
 # ==========================================
 # 6. LAYOUT PRINCIPAL
@@ -276,7 +273,7 @@ with col_left:
 
     fig_barras = px.bar(
         df_agrup_mes, x="Mes_Abrev", y="Valor", color="Tipo",
-        barmode="group", color_discrete_map={"Receita": "#6C5CE7", "Despesa": "#FD79A8"},
+        barmode="group", color_discrete_map={"Receita": "#00B894", "Despesa": "#FD79A8"},
         labels={"Mes_Abrev": "", "Valor": ""}
     )
     fig_barras.update_layout(
@@ -286,58 +283,111 @@ with col_left:
     )
     st.plotly_chart(fig_barras, use_container_width=True, key="barras_mensal")
 
-# --- COLUNA DA DIREITA ---
+# --- COLUNA DA DIREITA (GRÁFICOS ROSCA) ---
 with col_right:
-    pie1, pie2 = st.columns(2)
+    tab_graf_rec, tab_graf_desp = st.tabs(["🟢 Categorias Receita", "🔴 Categorias Despesa"])
     
-    with pie1:
-        st.markdown(f"**Despesas em {mes_sel}**")
-        df_desp_m = df_mes[df_mes["Tipo"] == "Despesa"] if not df_mes.empty else pd.DataFrame()
-        if not df_desp_m.empty and df_desp_m["Valor"].sum() > 0:
-            fig_d1 = px.pie(df_desp_m, names="Categoria", values="Valor", hole=0.6, color_discrete_sequence=cores_pie)
-        else:
-            fig_d1 = px.pie(names=["Sem Dados"], values=[1], hole=0.6, color_discrete_sequence=["#232733"])
-            
-        fig_d1.update_layout(showlegend=False, height=180, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)')
-        fig_d1.update_traces(textinfo='percent' if not df_desp_m.empty and df_desp_m["Valor"].sum() > 0 else 'none', textfont=dict(size=11))
-        st.plotly_chart(fig_d1, use_container_width=True, key="chart_donut_mes")
-
-    with pie2:
-        st.markdown(f"**Despesas em {ano_sel}**")
-        df_desp_a = df_ano[df_ano["Tipo"] == "Despesa"] if not df_ano.empty else pd.DataFrame()
-        if not df_desp_a.empty and df_desp_a["Valor"].sum() > 0:
-            fig_d2 = px.pie(df_desp_a, names="Categoria", values="Valor", hole=0.6, color_discrete_sequence=cores_pie)
-        else:
-            fig_d2 = px.pie(names=["Sem Dados"], values=[1], hole=0.6, color_discrete_sequence=["#232733"])
-            
-        fig_d2.update_layout(showlegend=False, height=180, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)')
-        fig_d2.update_traces(textinfo='percent' if not df_desp_a.empty and df_desp_a["Valor"].sum() > 0 else 'none', textfont=dict(size=11))
-        st.plotly_chart(fig_d2, use_container_width=True, key="chart_donut_ano")
-
-    st.markdown("**Participação na base anual**")
-    cat_cols = st.columns(6)
-    
-    if not df_desp_a.empty and df_desp_a["Valor"].sum() > 0:
-        cats = df_desp_a.groupby("Categoria")["Valor"].sum()
-        total_a = cats.sum() if cats.sum() > 0 else 1
+    # ------------------ ABA RECEITAS ------------------
+    with tab_graf_rec:
+        pie1, pie2 = st.columns(2)
         
-        for i, (cat_name, cat_val) in enumerate(cats.items()):
-            pct = (cat_val / total_a) * 100
-            with cat_cols[i % 6]:
-                fig_mini = go.Figure(go.Pie(
-                    values=[pct, 100-pct], hole=0.75,
-                    marker=dict(colors=[cores_pie[i % len(cores_pie)], '#232733']),
-                    textinfo='none'
-                ))
-                fig_mini.update_layout(
-                    showlegend=False, height=70, width=70,
-                    margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)',
-                    annotations=[dict(text=f"{int(pct)}%", x=0.5, y=0.5, font_size=10, showarrow=False, font_color="white")]
-                )
-                st.plotly_chart(fig_mini, use_container_width=True, config={'displayModeBar': False}, key=f"mini_donut_{i}")
-                st.caption(f"<p style='text-align: center; font-size: 10px; color: #8A8D9B;'>{cat_name}</p>", unsafe_allow_html=True)
-    else:
-        st.info("Sem lançamentos para exibir participação.")
+        with pie1:
+            st.markdown(f"**Receitas em {mes_sel}**")
+            df_rec_m = df_mes[df_mes["Tipo"] == "Receita"] if not df_mes.empty else pd.DataFrame()
+            if not df_rec_m.empty and df_rec_m["Valor"].sum() > 0:
+                fig_r1 = px.pie(df_rec_m, names="Categoria", values="Valor", hole=0.6, color_discrete_sequence=cores_receita)
+            else:
+                fig_r1 = px.pie(names=["Sem Dados"], values=[1], hole=0.6, color_discrete_sequence=["#232733"])
+                
+            fig_r1.update_layout(showlegend=False, height=180, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)')
+            fig_r1.update_traces(textinfo='percent' if not df_rec_m.empty and df_rec_m["Valor"].sum() > 0 else 'none', textfont=dict(size=11))
+            st.plotly_chart(fig_r1, use_container_width=True, key="chart_donut_rec_mes")
+
+        with pie2:
+            st.markdown(f"**Receitas em {ano_sel}**")
+            df_rec_a = df_ano[df_ano["Tipo"] == "Receita"] if not df_ano.empty else pd.DataFrame()
+            if not df_rec_a.empty and df_rec_a["Valor"].sum() > 0:
+                fig_r2 = px.pie(df_rec_a, names="Categoria", values="Valor", hole=0.6, color_discrete_sequence=cores_receita)
+            else:
+                fig_r2 = px.pie(names=["Sem Dados"], values=[1], hole=0.6, color_discrete_sequence=["#232733"])
+                
+            fig_r2.update_layout(showlegend=False, height=180, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)')
+            fig_r2.update_traces(textinfo='percent' if not df_rec_a.empty and df_rec_a["Valor"].sum() > 0 else 'none', textfont=dict(size=11))
+            st.plotly_chart(fig_r2, use_container_width=True, key="chart_donut_rec_ano")
+
+        st.markdown("**Participação na base anual**")
+        cat_cols_r = st.columns(6)
+        if not df_rec_a.empty and df_rec_a["Valor"].sum() > 0:
+            cats_r = df_rec_a.groupby("Categoria")["Valor"].sum()
+            total_r = cats_r.sum() if cats_r.sum() > 0 else 1
+            for i, (cat_name, cat_val) in enumerate(cats_r.items()):
+                pct = (cat_val / total_r) * 100
+                with cat_cols_r[i % 6]:
+                    fig_mini_r = go.Figure(go.Pie(
+                        values=[pct, 100-pct], hole=0.75,
+                        marker=dict(colors=[cores_receita[i % len(cores_receita)], '#232733']),
+                        textinfo='none'
+                    ))
+                    fig_mini_r.update_layout(
+                        showlegend=False, height=70, width=70,
+                        margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)',
+                        annotations=[dict(text=f"{int(pct)}%", x=0.5, y=0.5, font_size=10, showarrow=False, font_color="white")]
+                    )
+                    st.plotly_chart(fig_mini_r, use_container_width=True, config={'displayModeBar': False}, key=f"mini_donut_rec_{i}")
+                    st.caption(f"<p style='text-align: center; font-size: 10px; color: #8A8D9B;'>{cat_name}</p>", unsafe_allow_html=True)
+        else:
+            st.info("Sem lançamentos de receita para exibir participação.")
+
+    # ------------------ ABA DESPESAS ------------------
+    with tab_graf_desp:
+        pie1, pie2 = st.columns(2)
+        
+        with pie1:
+            st.markdown(f"**Despesas em {mes_sel}**")
+            df_desp_m = df_mes[df_mes["Tipo"] == "Despesa"] if not df_mes.empty else pd.DataFrame()
+            if not df_desp_m.empty and df_desp_m["Valor"].sum() > 0:
+                fig_d1 = px.pie(df_desp_m, names="Categoria", values="Valor", hole=0.6, color_discrete_sequence=cores_despesa)
+            else:
+                fig_d1 = px.pie(names=["Sem Dados"], values=[1], hole=0.6, color_discrete_sequence=["#232733"])
+                
+            fig_d1.update_layout(showlegend=False, height=180, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)')
+            fig_d1.update_traces(textinfo='percent' if not df_desp_m.empty and df_desp_m["Valor"].sum() > 0 else 'none', textfont=dict(size=11))
+            st.plotly_chart(fig_d1, use_container_width=True, key="chart_donut_desp_mes")
+
+        with pie2:
+            st.markdown(f"**Despesas em {ano_sel}**")
+            df_desp_a = df_ano[df_ano["Tipo"] == "Despesa"] if not df_ano.empty else pd.DataFrame()
+            if not df_desp_a.empty and df_desp_a["Valor"].sum() > 0:
+                fig_d2 = px.pie(df_desp_a, names="Categoria", values="Valor", hole=0.6, color_discrete_sequence=cores_despesa)
+            else:
+                fig_d2 = px.pie(names=["Sem Dados"], values=[1], hole=0.6, color_discrete_sequence=["#232733"])
+                
+            fig_d2.update_layout(showlegend=False, height=180, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)')
+            fig_d2.update_traces(textinfo='percent' if not df_desp_a.empty and df_desp_a["Valor"].sum() > 0 else 'none', textfont=dict(size=11))
+            st.plotly_chart(fig_d2, use_container_width=True, key="chart_donut_desp_ano")
+
+        st.markdown("**Participação na base anual**")
+        cat_cols_d = st.columns(6)
+        if not df_desp_a.empty and df_desp_a["Valor"].sum() > 0:
+            cats_d = df_desp_a.groupby("Categoria")["Valor"].sum()
+            total_d = cats_d.sum() if cats_d.sum() > 0 else 1
+            for i, (cat_name, cat_val) in enumerate(cats_d.items()):
+                pct = (cat_val / total_d) * 100
+                with cat_cols_d[i % 6]:
+                    fig_mini_d = go.Figure(go.Pie(
+                        values=[pct, 100-pct], hole=0.75,
+                        marker=dict(colors=[cores_despesa[i % len(cores_despesa)], '#232733']),
+                        textinfo='none'
+                    ))
+                    fig_mini_d.update_layout(
+                        showlegend=False, height=70, width=70,
+                        margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)',
+                        annotations=[dict(text=f"{int(pct)}%", x=0.5, y=0.5, font_size=10, showarrow=False, font_color="white")]
+                    )
+                    st.plotly_chart(fig_mini_d, use_container_width=True, config={'displayModeBar': False}, key=f"mini_donut_desp_{i}")
+                    st.caption(f"<p style='text-align: center; font-size: 10px; color: #8A8D9B;'>{cat_name}</p>", unsafe_allow_html=True)
+        else:
+            st.info("Sem lançamentos de despesa para exibir participação.")
 
 st.divider()
 
