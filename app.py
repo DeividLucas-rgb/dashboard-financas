@@ -16,7 +16,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def carregar_dados():
     """Lê os lançamentos salvos no Google Sheets."""
     try:
-        df_sheet = conn.read(worksheet="Lançamentos", ttl=0)
+        df_sheet = conn.read(worksheet="Lancamentos", ttl=0)
         colunas_esperadas = ["Data", "Tipo", "Categoria", "Descrição", "Valor", "Status"]
         if df_sheet.empty or not all(col in df_sheet.columns for col in colunas_esperadas):
             return pd.DataFrame(columns=colunas_esperadas)
@@ -25,7 +25,7 @@ def carregar_dados():
         return pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Descrição", "Valor", "Status"])
 
 def carregar_categorias():
-    """Lê as abas separadas Categorias_Receita e Categorias_despesa do Google Sheets."""
+    """Lê as abas separadas de categorias no Google Sheets."""
     cat_rec_padrao = ["Salário", "Freelancer", "Investimentos", "Outras Receitas"]
     cat_desp_padrao = ["Recreação", "Elétrica", "Moradia", "Saúde", "Transporte", "Alimentação", "Outras Despesas"]
     
@@ -36,9 +36,9 @@ def carregar_categorias():
     except Exception:
         rec = cat_rec_padrao
 
-    # Busca Despesas (com 'd' minúsculo igual sua planilha)
+    # Busca Despesas
     try:
-        df_desp = conn.read(worksheet="Categorias_despesa", ttl=0)
+        df_desp = conn.read(worksheet="Categorias_Despesa", ttl=0)
         desp = df_desp["Categoria"].dropna().tolist() if not df_desp.empty and "Categoria" in df_desp.columns else cat_desp_padrao
     except Exception:
         desp = cat_desp_padrao
@@ -46,23 +46,29 @@ def carregar_categorias():
     return rec, desp
 
 def salvar_dados(df_para_salvar):
-    """Atualiza a aba 'Lançamentos' na Planilha do Google."""
-    df_salvar = df_para_salvar.copy()
-    df_salvar = df_salvar[["Data", "Tipo", "Categoria", "Descrição", "Valor", "Status"]]
-    conn.update(worksheet="Lançamentos", data=df_salvar)
+    """Atualiza a aba 'Lancamentos' na Planilha do Google."""
+    try:
+        df_salvar = df_para_salvar.copy()
+        df_salvar = df_salvar[["Data", "Tipo", "Categoria", "Descrição", "Valor", "Status"]]
+        conn.update(worksheet="Lancamentos", data=df_salvar)
+        return True
+    except Exception as e:
+        st.error(f"⚠️ Erro ao salvar dados no Google Sheets: {e}. Verifique as permissões de edição da planilha.")
+        return False
 
 def salvar_categorias_no_sheets(tipo):
-    """Salva a lista na aba correspondente do Google Sheets de forma segura."""
+    """Salva a lista de categorias na aba correspondente do Google Sheets."""
     try:
         if tipo == "Receita":
             df_c = pd.DataFrame({"Categoria": st.session_state.categorias_receita})
             conn.update(worksheet="Categorias_Receita", data=df_c)
         else:
             df_c = pd.DataFrame({"Categoria": st.session_state.categorias_despesa})
-            # Aponta exatamente para 'Categorias_despesa'
-            conn.update(worksheet="Categorias_despesa", data=df_c)
+            conn.update(worksheet="Categorias_Despesa", data=df_c)
+        return True
     except Exception as e:
-        st.error(f"Erro ao salvar categorias: {e}")
+        st.error(f"⚠️ Erro ao salvar categorias no Google Sheets: {e}. Verifique se a planilha está liberada para edição.")
+        return False
 
 # Carregamento Inicial
 if "df_lancamentos" not in st.session_state:
@@ -134,7 +140,7 @@ mes_num_sel = [k for k, v in meses_nome.items() if v == mes_sel][0]
 # 4. DIÁLOGOS E POPUPS DE AÇÃO
 # ==========================================
 
-# Popup 1: Novo Lançamento (Dinâmico e Isolado)
+# Popup 1: Novo Lançamento
 @st.dialog("➕ Novo Lançamento")
 def novo_lancamento():
     tipo = st.radio("Tipo de Registro", ["Receita", "Despesa"], horizontal=True, key="tipo_registro_radio")
@@ -166,9 +172,10 @@ def novo_lancamento():
                 [st.session_state.df_lancamentos, pd.DataFrame([novo])], 
                 ignore_index=True
             )
-            salvar_dados(st.session_state.df_lancamentos)
-            st.success("Salvo com sucesso no Google Sheets!")
-            st.rerun()
+            sucesso = salvar_dados(st.session_state.df_lancamentos)
+            if sucesso:
+                st.success("Salvo com sucesso no Google Sheets!")
+                st.rerun()
 
 # Popup 2: Gerenciar Categorias
 @st.dialog("⚙️ Gerenciar Categorias")
@@ -185,18 +192,18 @@ def gerenciar_categorias():
     if st.button("➕ Adicionar Categoria", use_container_width=True):
         if nova_cat.strip() and nova_cat.strip() not in lista_atual:
             lista_atual.append(nova_cat.strip())
-            salvar_categorias_no_sheets(tipo_gerenciar)
-            st.success(f"Categoria '{nova_cat.strip()}' adicionada!")
-            st.rerun()
+            if salvar_categorias_no_sheets(tipo_gerenciar):
+                st.success(f"Categoria '{nova_cat.strip()}' adicionada!")
+                st.rerun()
             
     st.divider()
     cat_remover = st.selectbox(f"Remover de {tipo_gerenciar}:", options=["-- Selecione --"] + lista_atual)
     if st.button("🗑️ Remover Categoria", use_container_width=True):
         if cat_remover != "-- Selecione --":
             lista_atual.remove(cat_remover)
-            salvar_categorias_no_sheets(tipo_gerenciar)
-            st.success(f"Categoria '{cat_remover}' removida!")
-            st.rerun()
+            if salvar_categorias_no_sheets(tipo_gerenciar):
+                st.success(f"Categoria '{cat_remover}' removida!")
+                st.rerun()
 
 st.sidebar.divider()
 if st.sidebar.button("➕ Novo Lançamento", use_container_width=True):
@@ -360,8 +367,8 @@ def atualizar_base_geral(df_editado_aba, tipo_aba):
         df_editado_aba["Tipo"] = tipo_aba
         st.session_state.df_lancamentos = df_editado_aba.copy()
         
-    salvar_dados(st.session_state.df_lancamentos)
-    st.rerun()
+    if salvar_dados(st.session_state.df_lancamentos):
+        st.rerun()
 
 with tab_rec:
     df_rec_m = df_exibicao[df_exibicao["Tipo"] == "Receita"].drop(columns=["Tipo"], errors="ignore")
