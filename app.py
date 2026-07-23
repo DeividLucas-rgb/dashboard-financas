@@ -3,66 +3,51 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date
-import os
+from streamlit_gsheets import GSheetsConnection
 
 # ==========================================
-# 1. CONFIGURAÇÃO E PERSISTÊNCIA DE DADOS
+# 1. CONFIGURAÇÃO E CONEXÃO GOOGLE SHEETS
 # ==========================================
 
 st.set_page_config(page_title="Dashboard Finanças Pessoais", layout="wide")
 
-# Nomes dos arquivos CSV para salvar as informações permanentemente
-ARQUIVO_DADOS = "dados_financas.csv"
-ARQUIVO_CAT_REC = "categorias_receita.csv"
-ARQUIVO_CAT_DESP = "categorias_despesa.csv"
+# Inicializa conexão com a Planilha do Google
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 def carregar_dados():
-    """Carrega os dados dos arquivos CSV locais se existirem."""
-    # Carrega os lançamentos
-    if os.path.exists(ARQUIVO_DADOS):
-        st.session_state.df_lancamentos = pd.read_csv(ARQUIVO_DADOS)
-    else:
-        st.session_state.df_lancamentos = pd.DataFrame(
-            columns=["Data", "Tipo", "Categoria", "Descrição", "Valor", "Status"]
-        )
+    """Lê os dados salvos na aba 'Lançamentos' do Google Sheets."""
+    try:
+        # Lê os dados da aba Lançamentos com cache desativado (ttl=0) para sempre pegar a versão atualizada
+        df_sheet = conn.read(worksheet="Lançamentos", ttl=0)
+        
+        # Garante que as colunas corretas existam
+        colunas_esperadas = ["Data", "Tipo", "Categoria", "Descrição", "Valor", "Status"]
+        if df_sheet.empty or not all(col in df_sheet.columns for col in colunas_esperadas):
+            return pd.DataFrame(columns=colunas_esperadas)
+            
+        return df_sheet.dropna(how="all")
+    except Exception:
+        return pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Descrição", "Valor", "Status"])
 
-    # Carrega as categorias de Receita
-    if os.path.exists(ARQUIVO_CAT_REC):
-        df_cat_r = pd.read_csv(ARQUIVO_CAT_REC)
-        st.session_state.categorias_receita = df_cat_r["Categoria"].tolist()
-    else:
-        st.session_state.categorias_receita = [
-            "Salário", 
-            "Freelancer", 
-            "Investimentos", 
-            "Outras Receitas"
-        ]
+def salvar_dados(df_para_salvar):
+    """Atualiza a aba 'Lançamentos' na Planilha do Google."""
+    # Trata dados de data e numéricos antes de salvar
+    df_salvar = df_para_salvar.copy()
+    df_salvar = df_salvar[["Data", "Tipo", "Categoria", "Descrição", "Valor", "Status"]]
+    
+    # Grava na planilha
+    conn.update(worksheet="Lançamentos", data=df_salvar)
 
-    # Carrega as categorias de Despesa
-    if os.path.exists(ARQUIVO_CAT_DESP):
-        df_cat_d = pd.read_csv(ARQUIVO_CAT_DESP)
-        st.session_state.categorias_despesa = df_cat_d["Categoria"].tolist()
-    else:
-        st.session_state.categorias_despesa = [
-            "Recreação", 
-            "Elétrica", 
-            "Moradia", 
-            "Saúde", 
-            "Transporte", 
-            "Alimentação", 
-            "Outras Despesas"
-        ]
+# Carregamento Inicial
+if "df_lancamentos" not in st.session_state:
+    st.session_state.df_lancamentos = carregar_dados()
 
-def salvar_dados():
-    """Grava as alterações da sessão nos arquivos CSV no disco."""
-    st.session_state.df_lancamentos.to_csv(ARQUIVO_DADOS, index=False)
-    pd.DataFrame({"Categoria": st.session_state.categorias_receita}).to_csv(ARQUIVO_CAT_REC, index=False)
-    pd.DataFrame({"Categoria": st.session_state.categorias_despesa}).to_csv(ARQUIVO_CAT_DESP, index=False)
+# Lista Fixa de Categorias Base
+if "categorias_receita" not in st.session_state:
+    st.session_state.categorias_receita = ["Salário", "Freelancer", "Investimentos", "Outras Receitas"]
 
-# Inicializa o carregamento no primeiro carregamento
-if "dados_carregados" not in st.session_state:
-    carregar_dados()
-    st.session_state.dados_carregados = True
+if "categorias_despesa" not in st.session_state:
+    st.session_state.categorias_despesa = ["Recreação", "Elétrica", "Moradia", "Saúde", "Transporte", "Alimentação", "Outras Despesas"]
 
 # ==========================================
 # 2. ESTILIZAÇÃO CSS CUSTOMIZADA (NEON DARK)
@@ -70,40 +55,12 @@ if "dados_carregados" not in st.session_state:
 
 st.markdown("""
     <style>
-    .stApp {
-        background-color: #0E1117;
-        color: #FFFFFF;
-    }
-    
-    [data-testid="stSidebar"] {
-        background-color: #13151C;
-        border-right: 1px solid #232733;
-    }
-
-    div[data-testid="stMetric"] {
-        background-color: #1A1C24;
-        padding: 15px;
-        border-radius: 12px;
-        border: 1px solid #2A2E3D;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    }
-    
-    h1, h2, h3, h4 {
-        color: #FFFFFF !important;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-
-    .stButton>button {
-        background: linear-gradient(90deg, #6C5CE7 0%, #A29BFE 100%);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-weight: bold;
-        transition: 0.3s;
-    }
-    .stButton>button:hover {
-        box-shadow: 0 0 12px #6C5CE7;
-    }
+    .stApp { background-color: #0E1117; color: #FFFFFF; }
+    [data-testid="stSidebar"] { background-color: #13151C; border-right: 1px solid #232733; }
+    div[data-testid="stMetric"] { background-color: #1A1C24; padding: 15px; border-radius: 12px; border: 1px solid #2A2E3D; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    h1, h2, h3, h4 { color: #FFFFFF !important; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    .stButton>button { background: linear-gradient(90deg, #6C5CE7 0%, #A29BFE 100%); color: white; border: none; border-radius: 8px; font-weight: bold; transition: 0.3s; }
+    .stButton>button:hover { box-shadow: 0 0 12px #6C5CE7; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -113,15 +70,13 @@ st.markdown("""
 
 df = st.session_state.df_lancamentos.copy()
 
-if not df.empty:
+if not df.empty and "Data" in df.columns:
     df["Valor"] = pd.to_numeric(df["Valor"], errors="coerce").fillna(0.0)
     df["Data_dt"] = pd.to_datetime(df["Data"], errors="coerce")
     df["Ano"] = df["Data_dt"].dt.year
     df["Mes_Num"] = df["Data_dt"].dt.month
 else:
-    df["Data_dt"] = pd.Series(dtype='datetime64[ns]')
-    df["Ano"] = pd.Series(dtype='float64')
-    df["Mes_Num"] = pd.Series(dtype='float64')
+    df = pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Descrição", "Valor", "Status", "Data_dt", "Ano", "Mes_Num"])
 
 meses_nome = {
     1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril", 5: "Maio", 6: "Junho",
@@ -181,7 +136,8 @@ def novo_lancamento():
                 [st.session_state.df_lancamentos, pd.DataFrame([novo])], 
                 ignore_index=True
             )
-            salvar_dados()  # Salva em arquivo
+            salvar_dados(st.session_state.df_lancamentos)  # Envia para o Google Sheets
+            st.success("Salvo com sucesso na nuvem!")
             st.rerun()
 
 # Popup 2: Gerenciar Categorias
@@ -199,17 +155,7 @@ def gerenciar_categorias():
     if st.button("➕ Adicionar Categoria", use_container_width=True):
         if nova_cat.strip() and nova_cat.strip() not in lista_atual:
             lista_atual.append(nova_cat.strip())
-            salvar_dados()  # Salva em arquivo
             st.success(f"Categoria '{nova_cat.strip()}' adicionada em {tipo_gerenciar}!")
-            st.rerun()
-            
-    st.divider()
-    cat_remover = st.selectbox(f"Remover de {tipo_gerenciar}:", options=["-- Selecione --"] + lista_atual)
-    if st.button("🗑️ Remover Categoria", use_container_width=True):
-        if cat_remover != "-- Selecione --":
-            lista_atual.remove(cat_remover)
-            salvar_dados()  # Salva em arquivo
-            st.success(f"Categoria '{cat_remover}' removida!")
             st.rerun()
 
 st.sidebar.divider()
@@ -240,7 +186,6 @@ col_left, col_right = st.columns([1.8, 1])
 
 # --- COLUNA DA ESQUERDA ---
 with col_left:
-    # 1. KPIs de Resumo Financeiro
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     
     rec_recebidas = df_mes[(df_mes["Tipo"] == "Receita") & (df_mes["Status"] == "Recebido")]["Valor"].sum() if not df_mes.empty else 0.0
@@ -251,35 +196,30 @@ with col_left:
     
     saldo_atual = rec_recebidas - desp_pagas
     
-    # Card 1: Saldo
     with kpi1:
         st.markdown(f"**Saldo ({mes_sel})**\n<h4 style='color: #00CEC9;'>R$ {saldo_atual:,.2f}</h4>", unsafe_allow_html=True)
         fig_spark1 = go.Figure(go.Scatter(y=[0, 0, 0, saldo_atual], mode='lines', fill='tozeroy', line=dict(color='#00CEC9', width=2)))
         fig_spark1.update_layout(height=45, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(visible=False), yaxis=dict(visible=False))
         st.plotly_chart(fig_spark1, use_container_width=True, config={'displayModeBar': False}, key="spark_saldo")
         
-    # Card 2: Despesas Pagas
     with kpi2:
         st.markdown(f"**Despesas Pagas**\n<h4 style='color: #FD79A8;'>R$ {desp_pagas:,.2f}</h4>", unsafe_allow_html=True)
         fig_spark2 = go.Figure(go.Scatter(y=[0, 0, 0, desp_pagas], mode='lines', fill='tozeroy', line=dict(color='#FD79A8', width=2)))
         fig_spark2.update_layout(height=45, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(visible=False), yaxis=dict(visible=False))
         st.plotly_chart(fig_spark2, use_container_width=True, config={'displayModeBar': False}, key="spark_desp")
 
-    # Card 3: Receitas Pendentes
     with kpi3:
         st.markdown(f"**Receitas Pendentes**\n<h4 style='color: #FDCB6E;'>R$ {rec_pendentes:,.2f}</h4>", unsafe_allow_html=True)
         fig_spark3 = go.Figure(go.Scatter(y=[0, 0, 0, rec_pendentes], mode='lines', fill='tozeroy', line=dict(color='#FDCB6E', width=2)))
         fig_spark3.update_layout(height=45, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(visible=False), yaxis=dict(visible=False))
         st.plotly_chart(fig_spark3, use_container_width=True, config={'displayModeBar': False}, key="spark_rec_pend")
 
-    # Card 4: Despesas Pendentes
     with kpi4:
         st.markdown(f"**Despesas Pendentes**\n<h4 style='color: #E17055;'>R$ {desp_pendentes:,.2f}</h4>", unsafe_allow_html=True)
         fig_spark4 = go.Figure(go.Scatter(y=[0, 0, 0, desp_pendentes], mode='lines', fill='tozeroy', line=dict(color='#E17055', width=2)))
         fig_spark4.update_layout(height=45, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(visible=False), yaxis=dict(visible=False))
         st.plotly_chart(fig_spark4, use_container_width=True, config={'displayModeBar': False}, key="spark_desp_pend")
 
-    # 2. Gráfico de Análise Mensal
     st.markdown(f"### Análise Mensal ({ano_sel})")
     if not df_ano.empty and "Mes_Num" in df_ano.columns and len(df_ano) > 0:
         df_agrup_mes = df_ano.groupby(["Mes_Num", "Tipo"])["Valor"].sum().reset_index()
@@ -303,7 +243,6 @@ with col_left:
 with col_right:
     pie1, pie2 = st.columns(2)
     
-    # Donut 1: Despesas no Mês Selecionado
     with pie1:
         st.markdown(f"**Despesas em {mes_sel}**")
         df_desp_m = df_mes[df_mes["Tipo"] == "Despesa"] if not df_mes.empty else pd.DataFrame()
@@ -316,7 +255,6 @@ with col_right:
         fig_d1.update_traces(textinfo='percent' if not df_desp_m.empty and df_desp_m["Valor"].sum() > 0 else 'none', textfont=dict(size=11))
         st.plotly_chart(fig_d1, use_container_width=True, key="chart_donut_mes")
 
-    # Donut 2: Despesas no Ano Selecionado
     with pie2:
         st.markdown(f"**Despesas em {ano_sel}**")
         df_desp_a = df_ano[df_ano["Tipo"] == "Despesa"] if not df_ano.empty else pd.DataFrame()
@@ -329,7 +267,6 @@ with col_right:
         fig_d2.update_traces(textinfo='percent' if not df_desp_a.empty and df_desp_a["Valor"].sum() > 0 else 'none', textfont=dict(size=11))
         st.plotly_chart(fig_d2, use_container_width=True, key="chart_donut_ano")
 
-    # Participação na Base Anual
     st.markdown("**Participação na base anual**")
     cat_cols = st.columns(6)
     
@@ -369,30 +306,16 @@ todas_categorias = list(set(st.session_state.categorias_receita + st.session_sta
 df_editado = st.data_editor(
     df_exibicao,
     column_config={
-        "Categoria": st.column_config.SelectboxColumn(
-            "Categoria",
-            help="Selecione a categoria",
-            width="medium",
-            options=todas_categorias,
-            required=True
-        ),
-        "Tipo": st.column_config.SelectboxColumn(
-            "Tipo",
-            options=["Receita", "Despesa"],
-            required=True
-        ),
-        "Status": st.column_config.SelectboxColumn(
-            "Status",
-            options=["Recebido", "Pago", "Pendente"],
-            required=True
-        )
+        "Categoria": st.column_config.SelectboxColumn("Categoria", options=todas_categorias, required=True),
+        "Tipo": st.column_config.SelectboxColumn("Tipo", options=["Receita", "Despesa"], required=True),
+        "Status": st.column_config.SelectboxColumn("Status", options=["Recebido", "Pago", "Pendente"], required=True)
     },
     num_rows="dynamic",
     use_container_width=True,
     key="editor_dark"
 )
 
-# Sincroniza e grava caso haja edições na tabela
+# Sincroniza e envia alterações para o Google Sheets
 if not df_editado.equals(df_exibicao):
     if not st.session_state.df_lancamentos.empty:
         st.session_state.df_lancamentos["Data_temp"] = pd.to_datetime(st.session_state.df_lancamentos["Data"], errors="coerce")
@@ -405,5 +328,5 @@ if not df_editado.equals(df_exibicao):
     else:
         st.session_state.df_lancamentos = df_editado.copy()
         
-    salvar_dados()  # Salva em arquivo
+    salvar_dados(st.session_state.df_lancamentos)  # Atualiza a planilha
     st.rerun()
