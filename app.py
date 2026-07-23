@@ -11,43 +11,63 @@ from streamlit_gsheets import GSheetsConnection
 
 st.set_page_config(page_title="Dashboard Finanças Pessoais", layout="wide")
 
-# Inicializa conexão com a Planilha do Google
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def carregar_dados():
-    """Lê os dados salvos na aba 'Lançamentos' do Google Sheets."""
+    """Lê os lançamentos salvos no Google Sheets."""
     try:
-        # Lê os dados da aba Lançamentos com cache desativado (ttl=0) para sempre pegar a versão atualizada
         df_sheet = conn.read(worksheet="Lançamentos", ttl=0)
-        
-        # Garante que as colunas corretas existam
         colunas_esperadas = ["Data", "Tipo", "Categoria", "Descrição", "Valor", "Status"]
         if df_sheet.empty or not all(col in df_sheet.columns for col in colunas_esperadas):
             return pd.DataFrame(columns=colunas_esperadas)
-            
         return df_sheet.dropna(how="all")
     except Exception:
         return pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Descrição", "Valor", "Status"])
 
+def carregar_categorias():
+    """Lê as abas separadas Categorias_Receita e Categorias_Despesa do Google Sheets."""
+    cat_rec_padrao = ["Salário", "Freelancer", "Investimentos", "Outras Receitas"]
+    cat_desp_padrao = ["Recreação", "Elétrica", "Moradia", "Saúde", "Transporte", "Alimentação", "Outras Despesas"]
+    
+    # Busca Receitas
+    try:
+        df_rec = conn.read(worksheet="Categorias_Receita", ttl=0)
+        rec = df_rec["Categoria"].dropna().tolist() if not df_rec.empty and "Categoria" in df_rec.columns else cat_rec_padrao
+    except Exception:
+        rec = cat_rec_padrao
+
+    # Busca Despesas
+    try:
+        df_desp = conn.read(worksheet="Categorias_Despesa", ttl=0)
+        desp = df_desp["Categoria"].dropna().tolist() if not df_desp.empty and "Categoria" in df_desp.columns else cat_desp_padrao
+    except Exception:
+        desp = cat_desp_padrao
+
+    return rec, desp
+
 def salvar_dados(df_para_salvar):
     """Atualiza a aba 'Lançamentos' na Planilha do Google."""
-    # Trata dados de data e numéricos antes de salvar
     df_salvar = df_para_salvar.copy()
     df_salvar = df_salvar[["Data", "Tipo", "Categoria", "Descrição", "Valor", "Status"]]
-    
-    # Grava na planilha
     conn.update(worksheet="Lançamentos", data=df_salvar)
+
+def salvar_categorias_no_sheets(tipo):
+    """Salva a lista na aba correspondente do Google Sheets."""
+    if tipo == "Receita":
+        df_c = pd.DataFrame({"Categoria": st.session_state.categorias_receita})
+        conn.update(worksheet="Categorias_Receita", data=df_c)
+    else:
+        df_c = pd.DataFrame({"Categoria": st.session_state.categorias_despesa})
+        conn.update(worksheet="Categorias_Despesa", data=df_c)
 
 # Carregamento Inicial
 if "df_lancamentos" not in st.session_state:
     st.session_state.df_lancamentos = carregar_dados()
 
-# Lista Fixa de Categorias Base
-if "categorias_receita" not in st.session_state:
-    st.session_state.categorias_receita = ["Salário", "Freelancer", "Investimentos", "Outras Receitas"]
-
-if "categorias_despesa" not in st.session_state:
-    st.session_state.categorias_despesa = ["Recreação", "Elétrica", "Moradia", "Saúde", "Transporte", "Alimentação", "Outras Despesas"]
+if "categorias_receita" not in st.session_state or "categorias_despesa" not in st.session_state:
+    cat_r, cat_d = carregar_categorias()
+    st.session_state.categorias_receita = cat_r
+    st.session_state.categorias_despesa = cat_d
 
 # ==========================================
 # 2. ESTILIZAÇÃO CSS CUSTOMIZADA (NEON DARK)
@@ -110,18 +130,26 @@ mes_num_sel = [k for k, v in meses_nome.items() if v == mes_sel][0]
 # 4. DIÁLOGOS E POPUPS DE AÇÃO
 # ==========================================
 
-# Popup 1: Novo Lançamento
+# Popup 1: Novo Lançamento (Dinâmico e Isolado)
 @st.dialog("➕ Novo Lançamento")
 def novo_lancamento():
-    tipo = st.radio("Tipo de Registro", ["Receita", "Despesa"], horizontal=True)
-    opcoes_cat = st.session_state.categorias_receita if tipo == "Receita" else st.session_state.categorias_despesa
+    # Colocado FORA do st.form para atualizar a lista de categorias instantaneamente ao clicar
+    tipo = st.radio("Tipo de Registro", ["Receita", "Despesa"], horizontal=True, key="tipo_registro_radio")
     
-    with st.form("form_lancamento", clear_on_submit=True):
+    # Seleção RÍGIDA das opções
+    if tipo == "Receita":
+        opcoes_cat = st.session_state.categorias_receita
+        opcoes_status = ["Recebido", "Pendente"]
+    else:
+        opcoes_cat = st.session_state.categorias_despesa
+        opcoes_status = ["Pago", "Pendente"]
+    
+    with st.form("form_lancamento_interno", clear_on_submit=True):
         data_input = st.date_input("Data", date.today())
         categoria = st.selectbox("Categoria", options=opcoes_cat)
         descricao = st.text_input("Descrição")
         valor = st.number_input("Valor (R$)", min_value=0.0, format="%.2f")
-        status = st.selectbox("Status", ["Recebido", "Pendente"] if tipo == "Receita" else ["Pago", "Pendente"])
+        status = st.selectbox("Status", options=opcoes_status)
         
         if st.form_submit_button("Salvar Lançamento", type="primary"):
             novo = {
@@ -136,8 +164,8 @@ def novo_lancamento():
                 [st.session_state.df_lancamentos, pd.DataFrame([novo])], 
                 ignore_index=True
             )
-            salvar_dados(st.session_state.df_lancamentos)  # Envia para o Google Sheets
-            st.success("Salvo com sucesso na nuvem!")
+            salvar_dados(st.session_state.df_lancamentos)
+            st.success("Salvo com sucesso no Google Sheets!")
             st.rerun()
 
 # Popup 2: Gerenciar Categorias
@@ -155,7 +183,17 @@ def gerenciar_categorias():
     if st.button("➕ Adicionar Categoria", use_container_width=True):
         if nova_cat.strip() and nova_cat.strip() not in lista_atual:
             lista_atual.append(nova_cat.strip())
-            st.success(f"Categoria '{nova_cat.strip()}' adicionada em {tipo_gerenciar}!")
+            salvar_categorias_no_sheets(tipo_gerenciar)
+            st.success(f"Categoria '{nova_cat.strip()}' adicionada!")
+            st.rerun()
+            
+    st.divider()
+    cat_remover = st.selectbox(f"Remover de {tipo_gerenciar}:", options=["-- Selecione --"] + lista_atual)
+    if st.button("🗑️ Remover Categoria", use_container_width=True):
+        if cat_remover != "-- Selecione --":
+            lista_atual.remove(cat_remover)
+            salvar_categorias_no_sheets(tipo_gerenciar)
+            st.success(f"Categoria '{cat_remover}' removida!")
             st.rerun()
 
 st.sidebar.divider()
@@ -295,38 +333,64 @@ with col_right:
 st.divider()
 
 # ==========================================
-# 7. TABELA EDITÁVEL E SINCRONIZADA
+# 7. TABELAS EDITÁVEIS SEPARADAS POR TIPO
 # ==========================================
 
 st.markdown(f"### Detalhamento dos Lançamentos de {mes_sel}/{ano_sel} (Editável)")
 
 df_exibicao = df_mes.drop(columns=["Data_dt", "Ano", "Mes_Num", "Mes_Nome"], errors="ignore")
-todas_categorias = list(set(st.session_state.categorias_receita + st.session_state.categorias_despesa))
 
-df_editado = st.data_editor(
-    df_exibicao,
-    column_config={
-        "Categoria": st.column_config.SelectboxColumn("Categoria", options=todas_categorias, required=True),
-        "Tipo": st.column_config.SelectboxColumn("Tipo", options=["Receita", "Despesa"], required=True),
-        "Status": st.column_config.SelectboxColumn("Status", options=["Recebido", "Pago", "Pendente"], required=True)
-    },
-    num_rows="dynamic",
-    use_container_width=True,
-    key="editor_dark"
-)
+tab_rec, tab_desp = st.tabs(["🟢 Receitas", "🔴 Despesas"])
 
-# Sincroniza e envia alterações para o Google Sheets
-if not df_editado.equals(df_exibicao):
+def atualizar_base_geral(df_editado_aba, tipo_aba):
     if not st.session_state.df_lancamentos.empty:
         st.session_state.df_lancamentos["Data_temp"] = pd.to_datetime(st.session_state.df_lancamentos["Data"], errors="coerce")
-        df_outros_meses = st.session_state.df_lancamentos[
+        
+        df_outros = st.session_state.df_lancamentos[
             (st.session_state.df_lancamentos["Data_temp"].dt.month != mes_num_sel) | 
-            (st.session_state.df_lancamentos["Data_temp"].dt.year != ano_sel)
+            (st.session_state.df_lancamentos["Data_temp"].dt.year != ano_sel) |
+            (st.session_state.df_lancamentos["Tipo"] != tipo_aba)
         ].drop(columns=["Data_temp"], errors="ignore")
         
-        st.session_state.df_lancamentos = pd.concat([df_outros_meses, df_editado], ignore_index=True)
+        df_editado_aba["Tipo"] = tipo_aba
+        st.session_state.df_lancamentos = pd.concat([df_outros, df_editado_aba], ignore_index=True)
     else:
-        st.session_state.df_lancamentos = df_editado.copy()
+        df_editado_aba["Tipo"] = tipo_aba
+        st.session_state.df_lancamentos = df_editado_aba.copy()
         
-    salvar_dados(st.session_state.df_lancamentos)  # Atualiza a planilha
+    salvar_dados(st.session_state.df_lancamentos)
     st.rerun()
+
+with tab_rec:
+    df_rec_m = df_exibicao[df_exibicao["Tipo"] == "Receita"].drop(columns=["Tipo"], errors="ignore")
+    
+    df_edit_rec = st.data_editor(
+        df_rec_m,
+        column_config={
+            "Categoria": st.column_config.SelectboxColumn("Categoria", options=st.session_state.categorias_receita, required=True),
+            "Status": st.column_config.SelectboxColumn("Status", options=["Recebido", "Pendente"], required=True)
+        },
+        num_rows="dynamic",
+        use_container_width=True,
+        key="editor_receitas"
+    )
+    
+    if not df_edit_rec.equals(df_rec_m):
+        atualizar_base_geral(df_edit_rec, "Receita")
+
+with tab_desp:
+    df_desp_m = df_exibicao[df_exibicao["Tipo"] == "Despesa"].drop(columns=["Tipo"], errors="ignore")
+    
+    df_edit_desp = st.data_editor(
+        df_desp_m,
+        column_config={
+            "Categoria": st.column_config.SelectboxColumn("Categoria", options=st.session_state.categorias_despesa, required=True),
+            "Status": st.column_config.SelectboxColumn("Status", options=["Pago", "Pendente"], required=True)
+        },
+        num_rows="dynamic",
+        use_container_width=True,
+        key="editor_despesas"
+    )
+    
+    if not df_edit_desp.equals(df_desp_m):
+        atualizar_base_geral(df_edit_desp, "Despesa")
